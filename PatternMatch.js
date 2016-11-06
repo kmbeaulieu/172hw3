@@ -19,38 +19,64 @@ if (!Transform) {
  Transform = require('readable-stream/transform');
 }
 //Constructor logic includes Internal state logic. PatternMatch needs to consider it because it has to parse chunks that gets transformed
-function PatternMatch(matchme){
-    this.matchme = matchme;
+function PatternMatch(pattern){
+    this.pattern = pattern;
     //Switching on object mode so when stream reads sensordata it emits single pattern match.
-    Transform.call(this,
+   Transform.call(this,
         {objectMode: true}
     );
+    
 }
+
+// Transform classes require that we implement a single method called _transform and
+//optionally implement a method called _flush. You assignment will implement both.
+PatternMatch.prototype._transform = function (chunk, encoding, getNextChunk){
+   //filled in fromhttps://strongloop.com/strongblog/practical-examples-of-the-new-node-js-streams-api/
+    var data = chunk.toString();
+    if(this._lastLineData) data = this._lastLineData + data;
+    var lines = data.split(this.pattern);
+    this._lastLineData = lines.splice(lines.length-1,1)[0];
+    lines.forEach(this.push.bind(this));
+    getNextChunk();
+};
+
 
 // Extend the Transform class.
 // --
 // NOTE: This only extends the class methods - not the internal properties. As such we
 // have to make sure to call the Transform constructor(above).
-inherits(PatternMatch, Transform);
-// Transform classes require that we implement a single method called _transform and
-//optionally implement a method called _flush. You assignment will implement both.
-PatternMatch.prototype._transform = function (chunk, encoding, getNextChunk){
+util.inherits(PatternMatch, Transform); 
 
-}
 //After stream has been read and transformed, the _flush method is called. It is a great
 //place to push values to output stream and clean up existing data
 PatternMatch.prototype._flush = function (flushCompleted)	{
+    
+    if(this._lastLineData) this.push(this._lastLineData);
+    this._lastLineData = null;
+  
+    // Signal the end of the output stream.
+    this.push( null );
 
+    // Signal that the input has been fully processed.
+    flushCompleted();
 }
 //That wraps up patternMatch module.
-//Program module is for taking command line arguments
-program
- .option('-p, --pattern <pattern>', 'Input Pattern such as . ,')
- .parse(process.argv);
+//Program module is for taking command line arguments\
+var program = require("commander");
+var fs = require("fs");
+
+program.option('-p, --pattern <pattern>', 'Input Pattern such as . ,').parse(process.argv);
 // Create an input stream from the file system.
-var inputStream = fileSystem.createReadStream( "input-sensor.txt" );
+var inputStream = fs.createReadStream( "input-sensor.txt" );
 // Create a Pattern Matching stream that will run through the input and find matches
 // for the given pattern at the command line - "." and “,”.
-var patternStream = inputStream.pipe( new PatternMatch(...));
+var patternStream = inputStream.pipe( new PatternMatch(program.pattern));
 // Read matches from the stream.
-//TODO Fix this --> patternStream.on(
+var matches = [];
+patternStream.on("readable",function() {
+        var content = null;
+        while((content = this.read()) !== null){
+            matches.push(content);
+        }
+    }    
+);
